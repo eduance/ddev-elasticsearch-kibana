@@ -1,9 +1,63 @@
-#ddev-generated
-# Simple template to demonstrate elasticsearch
 version: "3.6"
 
 services:
+  setup:
+    container_name: ddev-${DDEV_SITENAME}-setup
+    hostname: ${DDEV_SITENAME}-setup
+    image: elasticsearch:8.8.0
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - ".:/mnt/ddev_config"
+    user: "0"
+    environment:
+      - VIRTUAL_HOST=$DDEV_HOSTNAME
+    command: >
+      bash -c '
+        if [ x${ELASTIC_PASSWORD} == x ]; then
+          echo "Set the ELASTIC_PASSWORD environment variable in the .env file";
+          exit 1;
+        elif [ x${KIBANA_PASSWORD} == x ]; then
+          echo "Set the KIBANA_PASSWORD environment variable in the .env file";
+          exit 1;
+        fi;
+        if [ ! -f config/certs/ca.zip ]; then
+          echo "Creating CA";
+          bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;
+          unzip config/certs/ca.zip -d config/certs;
+        fi;
+        if [ ! -f config/certs/certs.zip ]; then
+          echo "Creating certs";
+          echo -ne \
+          "instances:\n"\
+          "  - name: elasticsearch\n"\
+          "    dns:\n"\
+          "      - node\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          > config/certs/instances.yml;
+          bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
+          unzip config/certs/certs.zip -d config/certs;
+        fi;
+        echo "Setting file permissions"
+        chown -R root:root config/certs;
+        find . -type d -exec chmod 750 \{\} \;;
+        find . -type f -exec chmod 640 \{\} \;;
+        echo "Waiting for Elasticsearch availability";
+        until curl -s --cacert config/certs/ca/ca.crt http://elasticsearch:9200 | grep -q "missing authentication credentials"; do sleep 30; done;
+        echo "Setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:${ELASTIC_PASSWORD}" -H "Content-Type: application/json" http://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 10; done;
+        echo "All done!";
+      '
+    healthcheck:
+      test: [ "CMD-SHELL", "[ -f config/certs/es01/es01.crt ]" ]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+
   elasticsearch:
+    depends_on:
+      - setup
     container_name: ddev-${DDEV_SITENAME}-elasticsearch
     hostname: ${DDEV_SITENAME}-elasticsearch
     image: elasticsearch:8.8.0
@@ -11,15 +65,17 @@ services:
       - "9200"
       - "9300"
     environment:
-      - cluster.name: docker-cluster
-      - discovery.type: single-node
+      - cluster.name=docker-cluster
+      - discovery.type=single-node
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
       - VIRTUAL_HOST=$DDEV_HOSTNAME
       - HTTP_EXPOSE=9200:9200
       - HTTPS_EXPOSE=9201:9200
-      - xpack.security.enabled=false
-      - xpack.security.enrollment.enabled=false
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - xpack.security.enabled=true
+      - xpack.security.enrollment.enabled=true
+      - xpack.security.authc.api_key.enabled=true
     ulimits:
       memlock:
         soft: -1
@@ -28,6 +84,7 @@ services:
         soft: 65536
         hard: 65536
     volumes:
+      - certs:/usr/share/elasticsearch/config/certs
       - elasticsearch:/usr/share/elasticsearch/data
       - ".:/mnt/ddev_config"
     labels:
@@ -39,19 +96,22 @@ services:
     container_name: ddev-${DDEV_SITENAME}-kibana
     hostname: ${DDEV_SITENAME}-kibana
     depends_on:
+      - setup
       - elasticsearch
     ports:
       - "5601"
     environment:
-      XPACK_APM_SERVICEMAPENABLED: "true"
-      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: aaaaaaaa-c4d3-4a0a-8290-2abcb83ab3aa
       VIRTUAL_HOST: $DDEV_HOSTNAME
       HTTP_EXPOSE: 5601:5601
       HTTPS_EXPOSE: 5602:5601
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: ${KIBANA_PASSWORD}
     labels:
       com.ddev.site-name: ${DDEV_SITENAME}
       com.ddev.approot: $DDEV_APPROOT
     volumes:
+      - certs:/usr/share/kibana/config/certs
       - ".:/mnt/ddev_config"
 
   web:
@@ -59,4 +119,7 @@ services:
       - elasticsearch:elasticsearch
 
 volumes:
+  certs:
+    driver: local
   elasticsearch:
+    driver: local

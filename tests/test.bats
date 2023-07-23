@@ -12,9 +12,11 @@ setup() {
 }
 
 health_checks() {
-  # Do something useful here that verifies the add-on
-  # ddev exec "curl -s elasticsearch:9200" | grep "${PROJNAME}-elasticsearch"
-  ddev exec "curl -s https://localhost:443/"
+  # Check Elasticsearch health
+  ddev exec "curl -s http://elasticsearch:9200" | grep "docker-cluster" || ( echo "Elasticsearch health check failed"; exit 1 )
+
+  # Check Kibana health
+  ddev exec "curl -s https://localhost:5601" | grep "Welcome to Kibana" || ( echo "Kibana health check failed"; exit 1 )
 }
 
 teardown() {
@@ -24,7 +26,7 @@ teardown() {
   [ "${TESTDIR}" != "" ] && rm -rf ${TESTDIR}
 }
 
-@test "install from directory" {
+@test "install Elasticsearch and Kibana addon from directory" {
   set -eu -o pipefail
   cd ${TESTDIR}
   echo "# ddev get ${DIR} with project ${PROJNAME} in ${TESTDIR} ($(pwd))" >&3
@@ -33,12 +35,11 @@ teardown() {
   health_checks
 }
 
-@test "install from release" {
+@test "install Elasticsearch and Kibana addon from release" {
   set -eu -o pipefail
   cd ${TESTDIR} || ( printf "unable to cd to ${TESTDIR}\n" && exit 1 )
-  echo "# ddev get ddev/ddev-elasticsearch with project ${PROJNAME} in ${TESTDIR} ($(pwd))" >&3
-  ddev get ddev/ddev-elasticsearch
+  echo "# ddev get ddev/ddev-elasticsearch-kibana with project ${PROJNAME} in ${TESTDIR} ($(pwd))" >&3
+  ddev get ddev/ddev-elasticsearch-kibana
   ddev restart >/dev/null
   health_checks
 }
-
