@@ -1,0 +1,62 @@
+#ddev-generated
+# Simple template to demonstrate elasticsearch
+version: "3.6"
+
+services:
+  elasticsearch:
+    container_name: ddev-${DDEV_SITENAME}-elasticsearch
+    hostname: ${DDEV_SITENAME}-elasticsearch
+    image: elasticsearch:8.8.0
+    expose:
+      - "9200"
+      - "9300"
+    environment:
+      - cluster.name: docker-cluster
+      - discovery.type: single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - VIRTUAL_HOST=$DDEV_HOSTNAME
+      - HTTP_EXPOSE=9200:9200
+      - HTTPS_EXPOSE=9201:9200
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch:/usr/share/elasticsearch/data
+      - ".:/mnt/ddev_config"
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: $DDEV_APPROOT
+
+  kibana:
+    image: kibana:8.8.0
+    container_name: ddev-${DDEV_SITENAME}-kibana
+    hostname: ${DDEV_SITENAME}-kibana
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5601"
+    environment:
+      XPACK_APM_SERVICEMAPENABLED: "true"
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: aaaaaaaa-c4d3-4a0a-8290-2abcb83ab3aa
+      VIRTUAL_HOST: $DDEV_HOSTNAME
+      HTTP_EXPOSE: 5601:5601
+      HTTPS_EXPOSE: 5602:5601
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: $DDEV_APPROOT
+    volumes:
+      - ".:/mnt/ddev_config"
+
+  web:
+    links:
+      - elasticsearch:elasticsearch
+
+volumes:
+  elasticsearch:
